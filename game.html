@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Game</title>
+    <title>棉花糖飞行 · 穿墙彩蛋版</title>
     <style>
         * {
             margin: 0;
@@ -53,11 +53,35 @@
             font-weight: 600;
             font-size: 1.1rem;
             border: 1px solid #1a4a7a;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: 0.15s;
+            position: relative;
+            user-select: none;
+        }
+
+        .game-header .score-label:hover {
+            background: #1a4a7a;
+            transform: scale(1.02);
         }
 
         .game-header .score-label span {
             color: #ffd54f;
             font-size: 1.3rem;
+        }
+
+        /* 彩蛋激活时的奖杯样式 */
+        .game-header .score-label.egg-active {
+            background: #ff8f00;
+            border-color: #ffd54f;
+            box-shadow: 0 0 16px #ffb300;
+        }
+
+        .game-header .score-label.egg-active span {
+            color: #1a1a2e;
+            font-weight: 900;
         }
 
         canvas {
@@ -116,6 +140,11 @@
             margin-top: 10px;
         }
 
+        .hint .egg-hint {
+            color: #ffb300;
+            font-weight: 600;
+        }
+
         @media (max-width: 480px) {
             .game-wrapper {
                 padding: 12px 12px 16px;
@@ -132,10 +161,12 @@
 <body>
 
 <div class="game-wrapper">
-    <!-- 顶部栏 -->
+    <!-- 顶部栏 (奖杯可点击) -->
     <div class="game-header">
         <span class="title">🍭 棉花糖飞行</span>
-        <span class="score-label">🏆 <span id="scoreDisplay">0</span></span>
+        <span class="score-label" id="trophyLabel" title="点一下奖杯试试？">
+            🏆 <span id="scoreDisplay">0</span>
+        </span>
     </div>
 
     <!-- 游戏画布 -->
@@ -146,19 +177,20 @@
         <button class="btn" id="startBtn">🚀 开始</button>
         <button class="btn btn-restart" id="restartBtn">🔄 重来</button>
     </div>
-    <div class="hint">点击屏幕 / 按空格 让小鸟飞起来</div>
+    <div class="hint">点击屏幕 / 按空格 让小鸟飞起来 <span class="egg-hint">✨ 试试点击右上角奖杯 ✨</span></div>
 </div>
 
 <script>
     // ============================================================
-    //  🍭 棉花糖 Flappy Bird · 安卓6.0 彩蛋风格
-    //  致敬经典，简单又好上瘾！
+    //  🍭 棉花糖 Flappy Bird · 安卓6.0 彩蛋风格 + 穿墙彩蛋
+    //  点击奖杯 → 开启幽灵模式 (无视管道碰撞) 
     // ============================================================
 
     // ---------- DOM ----------
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreSpan = document.getElementById('scoreDisplay');
+    const trophyLabel = document.getElementById('trophyLabel');
 
     // ---------- 固定尺寸 ----------
     const W = 400;
@@ -170,9 +202,9 @@
     const GRAVITY = 0.4;
     const JUMP_FORCE = -7.5;
     const PIPE_WIDTH = 52;
-    const PIPE_GAP = 160;          // 缝隙高度
+    const PIPE_GAP = 160;
     const PIPE_SPEED = 2.5;
-    const PIPE_SPAWN_INTERVAL = 95; // 帧数间隔
+    const PIPE_SPAWN_INTERVAL = 95;
 
     // ---------- 游戏状态 ----------
     let bird = { x: 70, y: 280, vy: 0, radius: 16 };
@@ -183,7 +215,11 @@
     let animationId = null;
     let highScore = parseInt(localStorage.getItem('flappyHighScore')) || 0;
 
-    // ---------- 重置游戏 ----------
+    // ---------- ✨ 彩蛋状态 ----------
+    let ghostMode = false;          // 穿墙模式
+    let eggActive = false;          // 是否已激活彩蛋（视觉反馈）
+
+    // ---------- 重置游戏 (不重置彩蛋状态) ----------
     function resetGame() {
         bird = {
             x: 70,
@@ -203,7 +239,6 @@
     function startGame() {
         resetGame();
         gameState = 'playing';
-        // 给一个初始跳跃，让鸟先飞起来
         bird.vy = JUMP_FORCE * 0.8;
         if (animationId === null) {
             gameLoop();
@@ -219,7 +254,6 @@
         if (gameState === 'playing') {
             bird.vy = JUMP_FORCE;
         }
-        // gameover 时点击无效（可用重启按钮）
     }
 
     // ---------- 生成管道 ----------
@@ -242,7 +276,7 @@
         bird.vy += GRAVITY;
         bird.y += bird.vy;
 
-        // 天花板 / 地板碰撞（直接判死）
+        // 天花板 / 地板碰撞
         if (bird.y - bird.radius < 0) {
             bird.y = bird.radius;
             bird.vy = 0;
@@ -268,30 +302,28 @@
                 p.scored = true;
                 score++;
                 updateScoreDisplay();
-                // 每得 5 分增加一点难度（加速）
-                if (score % 5 === 0 && PIPE_SPEED < 5) {
-                    // 不能直接改常量，用变量存
-                }
             }
 
-            // 碰撞检测（鸟 vs 管道）
-            const birdLeft = bird.x - bird.radius;
-            const birdRight = bird.x + bird.radius;
-            const birdTop = bird.y - bird.radius;
-            const birdBottom = bird.y + bird.radius;
+            // ---------- 碰撞检测（如果彩蛋激活则跳过） ----------
+            if (!ghostMode) {
+                const birdLeft = bird.x - bird.radius;
+                const birdRight = bird.x + bird.radius;
+                const birdTop = bird.y - bird.radius;
+                const birdBottom = bird.y + bird.radius;
 
-            const pipeLeft = p.x;
-            const pipeRight = p.x + PIPE_WIDTH;
-            const gapTop = p.topHeight;
-            const gapBottom = p.topHeight + PIPE_GAP;
+                const pipeLeft = p.x;
+                const pipeRight = p.x + PIPE_WIDTH;
+                const gapTop = p.topHeight;
+                const gapBottom = p.topHeight + PIPE_GAP;
 
-            // 水平有重叠 且 (垂直撞上管或撞下管)
-            if (birdRight > pipeLeft && birdLeft < pipeRight) {
-                if (birdTop < gapTop || birdBottom > gapBottom) {
-                    gameOver();
-                    return;
+                if (birdRight > pipeLeft && birdLeft < pipeRight) {
+                    if (birdTop < gapTop || birdBottom > gapBottom) {
+                        gameOver();
+                        return;
+                    }
                 }
             }
+            // 幽灵模式：无碰撞
         }
 
         // ----- 生成新管道 -----
@@ -312,12 +344,33 @@
     function gameOver() {
         if (gameState === 'gameover') return;
         gameState = 'gameover';
-        // 保存最高分
         if (score > highScore) {
             highScore = score;
             localStorage.setItem('flappyHighScore', String(highScore));
         }
         drawCanvas();
+    }
+
+    // ---------- ✨ 彩蛋切换：幽灵模式 ----------
+    function toggleGhostMode() {
+        ghostMode = !ghostMode;
+        eggActive = ghostMode;   // 激活时高亮奖杯
+
+        // 更新奖杯样式
+        if (eggActive) {
+            trophyLabel.classList.add('egg-active');
+        } else {
+            trophyLabel.classList.remove('egg-active');
+        }
+
+        // 视觉反馈：在画布上短暂显示提示（可选）
+        // 直接重绘让效果立即显示
+        drawCanvas();
+
+        // 小彩蛋：如果游戏正在进行，给个轻微的视觉提示
+        if (gameState === 'playing') {
+            // 可以加个音效或闪光，这里不做了
+        }
     }
 
     // ---------- 绘制 ----------
@@ -343,7 +396,10 @@
         ctx.fillStyle = '#689f38';
         ctx.fillRect(0, H - 4, W, 4);
 
-        // ----- 管道 -----
+        // ----- 管道 (幽灵模式下半透明) -----
+        const pipeAlpha = ghostMode ? 0.55 : 1.0;
+        ctx.globalAlpha = pipeAlpha;
+
         pipes.forEach(p => {
             const x = p.x;
             const topH = p.topHeight;
@@ -352,7 +408,6 @@
             // 上管道（带帽檐）
             ctx.fillStyle = '#2e7d32';
             ctx.fillRect(x, 0, PIPE_WIDTH, topH);
-            // 帽檐
             ctx.fillStyle = '#388e3c';
             ctx.fillRect(x - 6, topH - 24, PIPE_WIDTH + 12, 24);
             ctx.fillStyle = '#1b5e20';
@@ -366,10 +421,9 @@
             ctx.fillStyle = '#1b5e20';
             ctx.fillRect(x - 4, bottomY + 18, PIPE_WIDTH + 8, 6);
 
-            // 棉花糖装饰（彩蛋风格）
+            // 棉花糖装饰
             ctx.shadowColor = 'rgba(255,255,255,0.3)';
             ctx.shadowBlur = 8;
-            // 上管棉花糖
             for (let i = 0; i < 3; i++) {
                 const cy = 30 + i * 28 + (x % 20);
                 if (cy < topH - 20) {
@@ -379,7 +433,6 @@
                     ctx.fill();
                 }
             }
-            // 下管棉花糖
             for (let i = 0; i < 3; i++) {
                 const cy = bottomY + 30 + i * 28 + (x % 20);
                 if (cy < H - 20) {
@@ -392,14 +445,23 @@
             ctx.shadowBlur = 0;
         });
 
+        // 恢复不透明度
+        ctx.globalAlpha = 1.0;
+
         // ----- 小鸟（安卓机器人风格） -----
         const bx = bird.x;
         const by = bird.y;
         const r = bird.radius;
 
-        // 身体（圆形 + 天线）
-        ctx.shadowColor = 'rgba(76, 175, 80, 0.5)';
-        ctx.shadowBlur = 18;
+        // 幽灵模式下小鸟半透明 + 发光
+        if (ghostMode) {
+            ctx.globalAlpha = 0.75;
+            ctx.shadowColor = '#00e5ff';
+            ctx.shadowBlur = 28;
+        } else {
+            ctx.shadowColor = 'rgba(76, 175, 80, 0.5)';
+            ctx.shadowBlur = 18;
+        }
 
         // 身体主圆
         const grad = ctx.createRadialGradient(bx - 4, by - 4, 4, bx, by, r + 4);
@@ -412,7 +474,7 @@
         ctx.fill();
 
         // 眼睛（白色）
-        ctx.shadowBlur = 0;
+        ctx.shadowBlur = ghostMode ? 12 : 0;
         ctx.fillStyle = 'white';
         ctx.beginPath();
         ctx.arc(bx - 7, by - 5, 6, 0, Math.PI * 2);
@@ -437,7 +499,7 @@
         ctx.arc(bx, by + 2, 6, 0.1, Math.PI - 0.1);
         ctx.stroke();
 
-        // 天线（安卓特色）
+        // 天线
         ctx.strokeStyle = '#2e7d32';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -448,6 +510,7 @@
         ctx.moveTo(bx + 10, by - r + 2);
         ctx.lineTo(bx + 14, by - r - 12);
         ctx.stroke();
+
         // 天线球
         ctx.fillStyle = '#66bb6a';
         ctx.beginPath();
@@ -457,7 +520,19 @@
         ctx.arc(bx + 14, by - r - 12, 5, 0, Math.PI * 2);
         ctx.fill();
 
+        // 幽灵模式额外光环
+        if (ghostMode) {
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 0.25;
+            ctx.beginPath();
+            ctx.arc(bx, by, r + 12, 0, Math.PI * 2);
+            ctx.fillStyle = '#00e5ff';
+            ctx.fill();
+            ctx.globalAlpha = 0.55;
+        }
+
         ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1.0;
 
         // ----- 游戏状态文字 -----
         if (gameState === 'idle') {
@@ -476,6 +551,10 @@
                 ctx.font = '16px system-ui';
                 ctx.fillText('🏆 最高分: ' + highScore, W / 2, H / 2 + 80);
             }
+            // 提示彩蛋
+            ctx.fillStyle = '#b0bec5';
+            ctx.font = '14px system-ui';
+            ctx.fillText('✨ 点击奖杯开启幽灵模式 ✨', W / 2, H / 2 + 130);
         }
 
         if (gameState === 'gameover') {
@@ -495,6 +574,12 @@
             ctx.fillStyle = '#b0bec5';
             ctx.font = '16px system-ui';
             ctx.fillText('点击「重来」再来一局', W / 2, H / 2 + 120);
+            // 如果幽灵模式开着，加个小提示
+            if (ghostMode) {
+                ctx.fillStyle = '#00e5ff';
+                ctx.font = '15px system-ui';
+                ctx.fillText('👻 幽灵模式已激活', W / 2, H / 2 + 165);
+            }
         }
 
         // 实时分数显示（游戏中）
@@ -504,6 +589,17 @@
             ctx.fillStyle = 'rgba(0,0,0,0.3)';
             ctx.font = 'bold 52px system-ui, sans-serif';
             ctx.fillText(score, W - 20, 14);
+
+            // 幽灵模式指示器
+            if (ghostMode) {
+                ctx.textAlign = 'left';
+                ctx.font = 'bold 16px system-ui';
+                ctx.fillStyle = 'rgba(0, 229, 255, 0.9)';
+                ctx.fillText('👻 幽灵模式', 16, 20);
+                // 加个小图标
+                ctx.font = '20px system-ui';
+                ctx.fillText('✨', 16, 44);
+            }
         }
     }
 
@@ -563,13 +659,27 @@
 
     // 重启按钮
     document.getElementById('restartBtn').addEventListener('click', () => {
+        // 重置游戏但保留彩蛋状态
         resetGame();
-        // 如果游戏正在运行，保持循环
         if (gameState === 'playing' || gameState === 'gameover') {
             gameState = 'idle';
         }
         drawCanvas();
+        // 保留幽灵模式
     });
+
+    // ---------- ✨ 奖杯彩蛋监听 ----------
+    trophyLabel.addEventListener('click', (e) => {
+        e.stopPropagation();  // 防止触发其他点击
+        toggleGhostMode();
+    });
+
+    // 触摸支持
+    trophyLabel.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleGhostMode();
+    }, { passive: false });
 
     // ---------- 初始化 ----------
     resetGame();
@@ -577,6 +687,7 @@
 
     console.log('🍭 棉花糖 Flappy 已加载！');
     console.log('🏆 最高分:', highScore);
+    console.log('✨ 彩蛋：点击右上角奖杯可开启/关闭幽灵模式（无视管道碰撞）');
 </script>
 
 </body>
